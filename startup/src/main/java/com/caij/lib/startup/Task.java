@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Task {
 
@@ -19,14 +20,13 @@ public class Task {
     public static final int STATE_WAIT = 3;
 
     public static final int DEFAULT_EXECUTE_PRIORITY = 0;
+    private int dependenciesSize = 0;
 
     private int mExecutePriority = DEFAULT_EXECUTE_PRIORITY;
 
     private Executor executorService;
 
     private Executor mainExecutor;
-
-    private Runnable mInternalRunnable;
 
     private final Runnable taskRunnable;
 
@@ -35,13 +35,9 @@ public class Task {
     public final boolean mustRunMainThread;
     public final boolean isInStage;
 
-
     private volatile int mCurrentState = STATE_IDLE;
 
-    private List<Task> mSuccessorList = new ArrayList<Task>();
-    protected Set<Task> mPredecessorSet = new HashSet<Task>();
-
-    private final Object lock = new Object();
+    private final List<Task> mSuccessorList = new ArrayList<Task>();
 
     private TaskListener taskListener;
 
@@ -66,86 +62,39 @@ public class Task {
         this.taskListener = taskListener;
     }
 
-    public synchronized void start() {
+    public void start() {
         if (mCurrentState != STATE_IDLE) {
             throw new RuntimeException("You try to run task " + mName + " twice, is there a circular dependency?");
         }
 
         switchState(STATE_WAIT);
+        Runnable internalRunnable = new Runnable() {
 
-        if (mInternalRunnable == null) {
-            mInternalRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        if (taskListener != null) {
-                            taskListener.onStart(Task.this);
-                        }
-                        switchState(STATE_RUNNING);
-                        if (mustRunMainThread) {
-                            mainExecutor.execute(new Runnable() {
-                                @Override
-                                public void run() {
-                                    try {
-                                        Task.this.run();
-                                    } catch (Throwable e) {
-                                        if (Config.isStrictMode) {
-                                            throw e;
-                                        }
-                                    } finally {
-                                        notifyAllTry();
-                                    }
-                                }
-                            });
-                            waitTry();
-                        } else {
-                            try {
-                                Task.this.run();
-                            } catch (Throwable e) {
-                                if (Config.isStrictMode) {
-                                    throw e;
-                                }
-                            }
-                        }
-                        switchState(STATE_FINISHED);
-                        if (taskListener != null) {
-                            taskListener.onFinish(Task.this);
-                        }
-                        notifyFinished();
-                    } finally {
-                        if (Config.isTrace) {
-                            Trace.endSection();
-                        }
+            @Override
+            public void run() {
+                if (taskListener != null) { taskListener.onStart(Task.this); }
+                try {
+                    Task.this.run();
+                } catch (Throwable e) {
+                    if (Config.isStrictMode) {
+                        throw e;
                     }
                 }
-            };
-        }
+                switchState(STATE_FINISHED);
+                if (taskListener != null) { taskListener.onFinish(Task.this); }
+                notifyFinished();
+            }
+        };
 
-        executorService.execute(mInternalRunnable);
+        if (mustRunMainThread) {
+            mainExecutor.execute(internalRunnable);
+        } else {
+            executorService.execute(internalRunnable);
+        }
     }
 
     public void setExecutorService(Executor executorService) {
         this.executorService = executorService;
-    }
-
-    private void waitTry() {
-        synchronized (lock) {
-            try {
-                lock.wait();
-            } catch (InterruptedException e) {
-
-            }
-        }
-    }
-
-    private void notifyAllTry() {
-        synchronized (lock) {
-            try {
-                lock.notifyAll();
-            } catch (Exception e) {
-
-            }
-        }
     }
 
     private void run() {
@@ -181,29 +130,9 @@ public class Task {
     // INNER API
     //==============================================================================================
 
-    /*package*/ void addPredecessor(Task task) {
-        mPredecessorSet.add(task);
-    }
-
-    public Set<Task> getPredecessorSet() {
-        return mPredecessorSet;
-    }
 
     public List<Task> getSuccessorList() {
         return mSuccessorList;
-    }
-
-    /*package*/ void removePredecessor(Task task) {
-        mPredecessorSet.remove(task);
-    }
-
-    /*package*/ void addSuccessor(Task task) {
-        if (task == this) {
-            throw new RuntimeException("A task should not after itself.");
-        }
-
-        task.addPredecessor(this);
-        mSuccessorList.add(task);
     }
 
     /*package*/ void notifyFinished() {
@@ -217,14 +146,13 @@ public class Task {
     }
 
     /*package*/
-    synchronized void onPredecessorFinished(Task beforeTask) {
-
-        if (mPredecessorSet.isEmpty()) {
-            return;
+    private void onPredecessorFinished(Task beforeTask) {
+        int size;
+        synchronized (this) {
+            size = dependenciesSize --;
         }
 
-        mPredecessorSet.remove(beforeTask);
-        if (mPredecessorSet.isEmpty()) {
+        if (size == 0) {
             start();
         }
     }
@@ -234,6 +162,21 @@ public class Task {
     //==============================================================================================
     private void switchState(int state) {
         mCurrentState = state;
+    }
+
+    void addDependencies(Task depTask) {
+        if (mCurrentState != STATE_IDLE) {
+            throw new RuntimeException("task " + mName + " running");
+        }
+        dependenciesSize ++;
+        depTask.addSuccessor(this);
+    }
+
+    private void addSuccessor(Task task) {
+        if (task == this) {
+            throw new RuntimeException("A task should not after itself.");
+        }
+        mSuccessorList.add(task);
     }
 
     //==============================================================================================

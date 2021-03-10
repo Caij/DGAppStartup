@@ -18,6 +18,6 @@ package com.caij.lib.startup;
 
 
 public class Config {
-    public static boolean isTrace = false;
+    public static final String TAG = "DGAppStartup";
     public static boolean isStrictMode = false;
 }
