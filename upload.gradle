@@ -1,0 +1,38 @@
+apply plugin: 'maven'
+
+task sourceJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier "sources"
+}
+
+artifacts {
+    archives sourceJar
+}
+
+uploadArchives {
+    repositories {
+        File localPropertiesFile = new File(rootDir.getAbsolutePath() + "/local.properties")
+        Properties properties = new Properties()
+        properties.load(localPropertiesFile.newDataInputStream())
+        def repositoryUrl = properties.getProperty('repositoryUrl')
+        def snapshotRepositoryUrl = properties.getProperty('snapshotRepositoryUrl')
+        def password = properties.getProperty('password')
+        def userName = properties.getProperty('userName')
+        mavenDeployer {
+            repository(url: "$repositoryUrl"){
+                authentication(userName: "$userName", password: "$password")
+            }
+
+            snapshotRepository(url: "$snapshotRepositoryUrl") {
+                authentication(userName: "$userName", password: "$password")
+            }
+
+            project.afterEvaluate {
+                def versionName = "${android.defaultConfig.versionName}"
+                pom.version = versionName
+                pom.artifactId = "$project.name"
+                pom.groupId = "com.caij.startup"
+            }
+        }
+    }
+}

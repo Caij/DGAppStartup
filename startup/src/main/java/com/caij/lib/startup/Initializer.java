@@ -2,9 +2,107 @@ package com.caij.lib.startup;
 
 import androidx.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
 
-public abstract class Initializer implements Runnable {
+public abstract class Initializer {
+
+    public static final int STATE_IDLE = 0;
+
+    public static final int STATE_RUNNING = 1;
+
+    public static final int STATE_FINISHED = 2;
+
+    public static final int STATE_WAIT = 3;
+
+    private Executor executorService;
+
+    private int dependenciesSize = 0;
+
+    private volatile int currentState = STATE_IDLE;
+
+    private final List<Initializer> successorList = new ArrayList<>();
+    private TaskListener taskListener;
+
+    public void start() {
+        if (currentState != STATE_IDLE) {
+            throw new RuntimeException("You try to run task " + getTaskName() + " twice, is there a circular dependency?");
+        }
+
+        switchState(STATE_WAIT);
+        Runnable internalRunnable = () -> {
+            if (taskListener != null) { taskListener.onStart(Initializer.this); }
+            switchState(STATE_RUNNING);
+            try {
+                Initializer.this.run();
+            } catch (Throwable e) {
+                if (Config.isStrictMode) {
+                    throw e;
+                }
+            }
+            switchState(STATE_FINISHED);
+            if (taskListener != null) { taskListener.onFinish(Initializer.this); }
+            notifyFinished();
+        };
+
+        executorService.execute(internalRunnable);
+    }
+
+    boolean isFinished() {
+        return currentState == STATE_FINISHED;
+    }
+
+    private void notifyFinished() {
+        if (!successorList.isEmpty()) {
+            Utils.sort(successorList);
+
+            for (Initializer task : successorList) {
+                task.onDependenciesTaskFinished();
+            }
+        }
+    }
+
+    private void onDependenciesTaskFinished() {
+        int size;
+        synchronized (this) {
+            dependenciesSize --;
+            size = dependenciesSize;
+        }
+
+        if (size == 0) {
+            start();
+        }
+    }
+
+    private void switchState(int state) {
+        currentState = state;
+    }
+
+    void addDependencies(Initializer depTask) {
+        if (currentState != STATE_IDLE) {
+            throw new RuntimeException("task " + getTaskName() + " running");
+        }
+        dependenciesSize ++;
+        depTask.addSuccessor(this);
+    }
+
+    private void addSuccessor(Initializer task) {
+        if (task == this) {
+            throw new RuntimeException("A task should not after itself.");
+        }
+        successorList.add(task);
+    }
+
+    void setExecutorService(Executor executor) {
+        this.executorService = executor;
+    }
+
+    void setTaskListener(TaskListener taskListener) {
+        this.taskListener = taskListener;
+    }
+
+    //----------------------------------
 
     public abstract void run();
 
@@ -26,10 +124,15 @@ public abstract class Initializer implements Runnable {
         return true;
     }
 
+    public abstract String getTaskName();
+
     @Override
     public boolean equals(@Nullable Object obj) {
-        return this.getClass() == obj.getClass();
+        return obj != null && this.getClass() == obj.getClass();
     }
 
-    public abstract String getTaskName();
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

@@ -7,14 +7,14 @@ import java.util.List;
 
 public class Utils {
 
-    private static final Comparator<Task> sTaskComparator = new Comparator<Task>() {
+    private static final Comparator<Initializer> sTaskComparator = new Comparator<Initializer>() {
         @Override
-        public int compare(Task lhs, Task rhs) {
-            return lhs.getExecutePriority() - rhs.getExecutePriority();
+        public int compare(Initializer lhs, Initializer rhs) {
+            return lhs.getPriority() - rhs.getPriority();
         }
     };
 
-    public static void sort(List<Task> tasks) {
+    public static void sort(List<Initializer> tasks) {
         if (tasks.size() <= 1) {
             return;
         }
