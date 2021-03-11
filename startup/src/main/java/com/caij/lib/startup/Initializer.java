@@ -104,26 +104,45 @@ public abstract class Initializer {
 
     //----------------------------------
 
+    /**
+     * task run
+     */
     public abstract void run();
 
     protected abstract List<Class<? extends Initializer>> dependencies();
 
+    /**
+     * @return dga start await task finish.
+     */
     public boolean isWaitOnMainThread() {
         return false;
     }
 
+    /**
+     * @return task run on main thread
+     */
     public boolean isMustRunMainThread() {
         return false;
     }
 
+    /**
+     * The smaller the value, the higher the priority
+     * @return task execute priority
+     */
     public int getPriority() {
         return 0;
     }
 
+    /**
+     * @return
+     */
     public boolean isInStage() {
         return true;
     }
 
+    /**
+     * @return task name
+     */
     public abstract String getTaskName();
 
     @Override
