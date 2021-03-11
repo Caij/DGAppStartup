@@ -7,7 +7,8 @@ import java.util.List;
 public abstract class Initializer implements Runnable {
 
     public abstract void run();
-    public abstract List<Class<? extends Initializer>> dependencies();
+
+    protected abstract List<Class<? extends Initializer>> dependencies();
 
     public boolean isWaitOnMainThread() {
         return false;

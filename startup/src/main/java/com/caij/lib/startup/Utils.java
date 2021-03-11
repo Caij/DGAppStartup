@@ -7,7 +7,7 @@ import java.util.List;
 
 public class Utils {
 
-    private static Comparator<Task> sTaskComparator = new Comparator<Task>() {
+    private static final Comparator<Task> sTaskComparator = new Comparator<Task>() {
         @Override
         public int compare(Task lhs, Task rhs) {
             return lhs.getExecutePriority() - rhs.getExecutePriority();

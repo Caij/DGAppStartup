@@ -1,13 +1,9 @@
 package com.caij.lib.startup;
 
-import android.os.Trace;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class Task {
 
@@ -19,82 +15,57 @@ public class Task {
 
     public static final int STATE_WAIT = 3;
 
-    public static final int DEFAULT_EXECUTE_PRIORITY = 0;
-    private int dependenciesSize = 0;
-
-    private int mExecutePriority = DEFAULT_EXECUTE_PRIORITY;
-
-    private Executor executorService;
-
-    private Executor mainExecutor;
-
+    private final Executor executorService;
     private final Runnable taskRunnable;
 
-    public final String mName;
+    public final String name;
+    private int dependenciesSize = 0;
+    private final int executePriority;
+
     public final boolean waitOnMainThread;
-    public final boolean mustRunMainThread;
     public final boolean isInStage;
 
-    private volatile int mCurrentState = STATE_IDLE;
+    private volatile int currentState = STATE_IDLE;
 
-    private final List<Task> mSuccessorList = new ArrayList<Task>();
+    private final List<Task> successorList = new ArrayList<>();
+    private final TaskListener taskListener;
 
-    private TaskListener taskListener;
-
-    Task(Builder builder) {
+    private Task(Builder builder) {
         if (builder.taskName == null) {
             builder.taskName = builder.runnable.getClass().getSimpleName();
         }
 
-        this.mName = builder.taskName;
+        this.name = builder.taskName;
         this.waitOnMainThread = builder.waitOnMainThread;
-        this.mustRunMainThread = builder.mustRunMainThread;
+        this.executorService = builder.executorService;
         this.taskRunnable = builder.runnable;
 
         this.isInStage = builder.isInStage;
-    }
-
-    void setMainExecutor(Executor mainExecutor) {
-        this.mainExecutor = mainExecutor;
-    }
-
-    public void setTaskListener(TaskListener taskListener) {
-        this.taskListener = taskListener;
+        this.taskListener = builder.defaultTaskListener;
+        this.executePriority = builder.priority;
     }
 
     public void start() {
-        if (mCurrentState != STATE_IDLE) {
-            throw new RuntimeException("You try to run task " + mName + " twice, is there a circular dependency?");
+        if (currentState != STATE_IDLE) {
+            throw new RuntimeException("You try to run task " + name + " twice, is there a circular dependency?");
         }
 
         switchState(STATE_WAIT);
-        Runnable internalRunnable = new Runnable() {
-
-            @Override
-            public void run() {
-                if (taskListener != null) { taskListener.onStart(Task.this); }
-                try {
-                    Task.this.run();
-                } catch (Throwable e) {
-                    if (Config.isStrictMode) {
-                        throw e;
-                    }
+        Runnable internalRunnable = () -> {
+            if (taskListener != null) { taskListener.onStart(Task.this); }
+            switchState(STATE_RUNNING);
+            try {
+                Task.this.run();
+            } catch (Throwable e) {
+                if (Config.isStrictMode) {
+                    throw e;
                 }
-                switchState(STATE_FINISHED);
-                if (taskListener != null) { taskListener.onFinish(Task.this); }
-                notifyFinished();
             }
+            switchState(STATE_FINISHED);
+            if (taskListener != null) { taskListener.onFinish(Task.this); }
+            notifyFinished();
         };
-
-        if (mustRunMainThread) {
-            mainExecutor.execute(internalRunnable);
-        } else {
-            executorService.execute(internalRunnable);
-        }
-    }
-
-    public void setExecutorService(Executor executorService) {
-        this.executorService = executorService;
+        executorService.execute(internalRunnable);
     }
 
     private void run() {
@@ -103,53 +74,33 @@ public class Task {
         }
     }
 
-    public int getCurrentState() {
-        return mCurrentState;
+    boolean isFinished() {
+        return currentState == STATE_FINISHED;
     }
-
-    public boolean isRunning() {
-        return mCurrentState == STATE_RUNNING;
-    }
-
-
-    public boolean isFinished() {
-        return mCurrentState == STATE_FINISHED;
-    }
-
-
-    public void setExecutePriority(int executePriority) {
-        mExecutePriority = executePriority;
-    }
-
 
     public int getExecutePriority() {
-        return mExecutePriority;
+        return executePriority;
     }
 
     //==============================================================================================
     // INNER API
     //==============================================================================================
 
+    private void notifyFinished() {
+        if (!successorList.isEmpty()) {
+            Utils.sort(successorList);
 
-    public List<Task> getSuccessorList() {
-        return mSuccessorList;
-    }
-
-    /*package*/ void notifyFinished() {
-        if (!mSuccessorList.isEmpty()) {
-            Utils.sort(mSuccessorList);
-
-            for (Task task : mSuccessorList) {
-                task.onPredecessorFinished(this);
+            for (Task task : successorList) {
+                task.onDependenciesTaskFinished();
             }
         }
     }
 
-    /*package*/
-    private void onPredecessorFinished(Task beforeTask) {
+    private void onDependenciesTaskFinished() {
         int size;
         synchronized (this) {
-            size = dependenciesSize --;
+            dependenciesSize --;
+            size = dependenciesSize;
         }
 
         if (size == 0) {
@@ -161,12 +112,12 @@ public class Task {
     // PRIVATE METHOD
     //==============================================================================================
     private void switchState(int state) {
-        mCurrentState = state;
+        currentState = state;
     }
 
     void addDependencies(Task depTask) {
-        if (mCurrentState != STATE_IDLE) {
-            throw new RuntimeException("task " + mName + " running");
+        if (currentState != STATE_IDLE) {
+            throw new RuntimeException("task " + name + " running");
         }
         dependenciesSize ++;
         depTask.addSuccessor(this);
@@ -176,7 +127,7 @@ public class Task {
         if (task == this) {
             throw new RuntimeException("A task should not after itself.");
         }
-        mSuccessorList.add(task);
+        successorList.add(task);
     }
 
     //==============================================================================================
@@ -186,11 +137,13 @@ public class Task {
 
     public static class Builder {
 
+        public Executor executorService;
         private String taskName;
         private Runnable runnable;
         private boolean waitOnMainThread;
-        private boolean mustRunMainThread;
         private boolean isInStage;
+        private TaskListener defaultTaskListener;
+        private int priority;
 
         public Builder() {
 
@@ -211,13 +164,23 @@ public class Task {
             return this;
         }
 
-        public Builder setMustRunMainThread(boolean mustRunMainThread) {
-            this.mustRunMainThread = mustRunMainThread;
+        public Builder setExecutorService(Executor executorService) {
+            this.executorService = executorService;
             return this;
         }
 
         public Builder setInStage(boolean inStage) {
             isInStage = inStage;
+            return this;
+        }
+
+        public Builder setTaskListener(TaskListener defaultTaskListener) {
+            this.defaultTaskListener = defaultTaskListener;
+            return this;
+        }
+
+        public Builder setExecutePriority(int priority) {
+            this.priority = priority;
             return this;
         }
 

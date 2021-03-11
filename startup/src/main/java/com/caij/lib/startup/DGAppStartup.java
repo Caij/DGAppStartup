@@ -6,65 +6,74 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class DGAppStartup implements OnProjectListener {
+public class DGAppStartup {
 
-    private Task startTask;
-    private Task finishTask;
     private CountDownLatch waitCountDownLatch;
-    private final List<Task> tasks;
+
     private BlockingQueue<Runnable> blockingQueue;
     private int mainTaskCount;
     private Executor mainExecutor;
-    private final List<TaskListener> taskListeners;
-    private List<OnProjectListener> mExecuteListeners = new ArrayList<OnProjectListener>();
-    private final AtomicInteger inStageSize;
 
-    DGAppStartup(Builder builder) {
-        taskListeners = builder.taskListeners;
+    private final List<Task> tasks;
+    private final List<TaskListener> taskListeners;
+    private final List<OnProjectListener> projectListeners;
+    private final AtomicInteger inStageSize;
+    private final AtomicInteger taskSize;
+    private final List<Task> startTask;
+
+    private DGAppStartup(Builder builder) {
+        this.taskListeners = builder.taskListeners;
+        this.projectListeners = builder.projectListeners;
 
         ThreadPoolExecutor threadPoolExecutor = builder.threadPoolExecutor;
-        finishTask = new Task.Builder()
-                .setRunnable(new AnchorTask(false, this))
-                .setTaskName("==AppFinishTask==")
-                .build();
-
-        finishTask.setExecutorService(threadPoolExecutor);
-
-        startTask = new Task.Builder()
-                .setRunnable(new AnchorTask(true, this))
-                .setTaskName("==AppStartTask==")
-                .build();
-        startTask.setExecutorService(threadPoolExecutor);
-
-        mExecuteListeners = builder.mExecuteListeners;
 
         tasks = new ArrayList<>();
 
         Map<Class<? extends Initializer>, Task> taskMap = new HashMap<>();
+        TaskListener defaultTaskListener = new TaskStateListener();
+        int inStageSize = 0;
+        int waitCount = 0;
         for (Initializer initializer : builder.initializers) {
             Task.Builder taskBuilder = new Task.Builder();
             taskBuilder.setRunnable(initializer)
                     .setTaskName(initializer.getTaskName())
-                    .setMustRunMainThread(initializer.isMustRunMainThread())
                     .setWaitOnMainThread(initializer.isWaitOnMainThread())
+                    .setTaskListener(defaultTaskListener)
+                    .setExecutePriority(initializer.getPriority())
                     .setInStage(initializer.isInStage());
+            if (initializer.isMustRunMainThread()) {
+                taskBuilder.setExecutorService(getMainExecutor());
+                mainTaskCount ++;
+            } else {
+                taskBuilder.setExecutorService(threadPoolExecutor);
+            }
+
+            if (initializer.isInStage()) {
+                inStageSize ++;
+            }
+
+            if (initializer.isWaitOnMainThread()) {
+                waitCount ++;
+            }
+
             Task task = taskBuilder.build();
-            task.setExecutePriority(initializer.getPriority());
             taskMap.put(initializer.getClass(), task);
             tasks.add(task);
         }
 
+        startTask = new ArrayList<>();
         for (Initializer initializer : builder.initializers) {
             List<Class<? extends Initializer>> dependencies = initializer.dependencies();
             Task curTask = taskMap.get(initializer.getClass());
+            if (curTask == null) throw new IllegalStateException("task create error");
             if (dependencies != null && !dependencies.isEmpty()) {
                 for (Class<? extends Initializer> clazz : dependencies) {
                     Task depTask = taskMap.get(clazz);
@@ -75,45 +84,12 @@ public class DGAppStartup implements OnProjectListener {
                     }
                 }
             } else {
-                curTask.addDependencies(startTask);
+                startTask.add(curTask);
             }
         }
+        Utils.sort(startTask);
 
-        int inStageSize = 0;
-
-        int waitCount = 0;
-        TaskListener defaultTaskListener = new TaskStateListener();
-        for (final Task task : tasks) {
-            task.setExecutorService(threadPoolExecutor);
-            task.setTaskListener(defaultTaskListener);
-            if (task.isInStage) {
-                inStageSize ++;
-            }
-
-            List<Task> finishEndTask = task.getSuccessorList();
-            if (finishEndTask == null || finishEndTask.isEmpty()) {
-                finishTask.addDependencies(task);
-            }
-
-            if (task.waitOnMainThread) {
-                waitCount ++;
-            }
-
-            if (task.mustRunMainThread) {
-                if (blockingQueue == null){
-                    blockingQueue = new LinkedBlockingDeque<>();
-                    mainExecutor = new Executor() {
-                        @Override
-                        public void execute(Runnable command) {
-                            blockingQueue.offer(command);
-                        }
-                    };
-                }
-                task.setMainExecutor(mainExecutor);
-                mainTaskCount ++;
-            }
-        }
-
+        this.taskSize = new AtomicInteger(tasks.size());
         this.inStageSize = new AtomicInteger(inStageSize);
 
         if (waitCount > 0) {
@@ -121,76 +97,94 @@ public class DGAppStartup implements OnProjectListener {
         }
     }
 
+    private Executor getMainExecutor() {
+        if (mainExecutor == null) {
+            if (blockingQueue == null) {
+                blockingQueue = new LinkedBlockingDeque<>();
+                mainExecutor = command -> {
+                    if (mainTaskCount > 0) {
+                        blockingQueue.offer(command);
+                    } else {
+                        command.run();
+                    }
+                };
+            }
+        }
+        return mainExecutor;
+    }
+
     private void notifyStageFinish() {
-        for (OnProjectListener onProjectListener : mExecuteListeners) {
+        for (OnProjectListener onProjectListener : projectListeners) {
             onProjectListener.onStageFinish();
         }
     }
 
-    public void start() {
-        startTask.start();
-    }
-
-    public void startAndAwait() {
-        startTask.start();
-        await();
-    }
-
-    private void await() {
-        waitMainTaskRun();
-        if (waitCountDownLatch != null) {
-            try {
-                waitCountDownLatch.await();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+    public DGAppStartup start() {
+        if (startTask.isEmpty()) {
+            throw new RuntimeException("not have start task, please check task dependencies");
         }
+
+        onProjectStart();
+
+        for (Task task : startTask) {
+            task.start();
+        }
+        return this;
     }
 
-    private void waitMainTaskRun() {
+    public void await(long timeout) {
+        boolean isTimeOut = false;
         while (mainTaskCount > 0) {
             try {
-                Runnable runnable = blockingQueue.take();
-                runnable.run();
+                Runnable runnable;
+                if (timeout > 0) {
+                    runnable = blockingQueue.poll(timeout, TimeUnit.MILLISECONDS);
+                } else {
+                    runnable = blockingQueue.take();
+                }
+                if (runnable != null) {
+                    runnable.run();
+                } else {
+                    isTimeOut = timeout > 0;
+                    if (isTimeOut) mainTaskCount = 0;
+                }
             } catch (Exception e) {
                 Log.d(Config.TAG, e.getMessage());
             } finally {
                 mainTaskCount --;
             }
         }
-    }
 
-    public int getCurrentState() {
-        if (startTask.getCurrentState() == Task.STATE_IDLE) {
-            return Task.STATE_IDLE;
-        } else if (finishTask.getCurrentState() == Task.STATE_FINISHED) {
-            return Task.STATE_FINISHED;
-        } else {
-            return Task.STATE_RUNNING;
+        if (!isTimeOut) {
+            if (waitCountDownLatch != null) {
+                try {
+                    if (timeout > 0) {
+                        waitCountDownLatch.await(timeout, TimeUnit.MILLISECONDS);
+                    } else {
+                        waitCountDownLatch.await();
+                    }
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
         }
     }
 
-    public boolean isRunning() {
-        return getCurrentState() == Task.STATE_RUNNING;
+    public void await() {
+        await(-1);
     }
 
-    public boolean isFinished() {
-        return getCurrentState() == Task.STATE_FINISHED;
-    }
-
-    @Override
-    public void onProjectStart() {
-        if (mExecuteListeners != null && !mExecuteListeners.isEmpty()) {
-            for (OnProjectListener listener : mExecuteListeners) {
+    private void onProjectStart() {
+        if (projectListeners != null && !projectListeners.isEmpty()) {
+            for (OnProjectListener listener : projectListeners) {
                 listener.onProjectStart();
             }
         }
     }
 
-    @Override
-    public void onProjectFinish() {
-        if (mExecuteListeners != null && !mExecuteListeners.isEmpty()) {
-            for (OnProjectListener listener : mExecuteListeners) {
+    private void onProjectFinish() {
+        if (projectListeners != null && !projectListeners.isEmpty()) {
+            for (OnProjectListener listener : projectListeners) {
                 listener.onProjectFinish();
             }
         }
@@ -204,37 +198,23 @@ public class DGAppStartup implements OnProjectListener {
         }
     }
 
-    @Override
-    public void onStageFinish() {
-
-    }
-
     public void addOnProjectExecuteListener(OnProjectListener listener) {
-        mExecuteListeners.add(listener);
+        projectListeners.add(listener);
     }
 
     public static class Builder {
 
         private final List<Initializer> initializers = new ArrayList<>();
-        private final List<OnProjectListener> mExecuteListeners = new ArrayList<OnProjectListener>();
+        private final List<OnProjectListener> projectListeners = new ArrayList<OnProjectListener>();
         private ThreadPoolExecutor threadPoolExecutor;
         private final List<TaskListener> taskListeners = new ArrayList<>();
 
-        /**
-         * 构建{@code ProjectBuilder}实例。
-         */
-        public Builder() {
-
-        }
-
         public DGAppStartup create() {
-
-
             return new DGAppStartup(this);
         }
 
         public Builder addOnProjectExecuteListener(OnProjectListener listener) {
-            mExecuteListeners.add(listener);
+            projectListeners.add(listener);
             return Builder.this;
         }
 
@@ -257,28 +237,6 @@ public class DGAppStartup implements OnProjectListener {
         }
     }
 
-    private static class AnchorTask implements Runnable {
-
-        private final boolean mIsStartTask;
-        private final OnProjectListener mExecuteListener;
-
-        public AnchorTask(boolean isStartTask, OnProjectListener onProjectListener) {
-            mIsStartTask = isStartTask;
-            mExecuteListener = onProjectListener;
-        }
-
-        @Override
-        public void run() {
-            if (mExecuteListener != null) {
-                if (mIsStartTask) {
-                    mExecuteListener.onProjectStart();
-                } else {
-                    mExecuteListener.onProjectFinish();
-                }
-            }
-        }
-    }
-
     private class TaskStateListener implements TaskListener {
 
         @Override
@@ -294,16 +252,15 @@ public class DGAppStartup implements OnProjectListener {
                 taskListener.onFinish(task);
             }
 
-            if (task.waitOnMainThread) {
-                waitCountDownLatch.countDown();
-            }
+            if (task.waitOnMainThread) { waitCountDownLatch.countDown(); }
 
             if (task.isInStage) {
                 int size = inStageSize.decrementAndGet();
-                if (size == 0) {
-                    notifyStageFinish();
-                }
+                if (size == 0) { notifyStageFinish(); }
             }
+
+            int size = taskSize.decrementAndGet();
+            if (size == 0) { onProjectFinish(); }
         }
     }
 }

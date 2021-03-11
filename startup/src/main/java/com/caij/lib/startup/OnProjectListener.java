@@ -2,9 +2,9 @@ package com.caij.lib.startup;
 
 public interface OnProjectListener {
 
-    public void onProjectStart();
+    void onProjectStart();
 
-    public void onProjectFinish();
+    void onProjectFinish();
 
-    public void onStageFinish();
+    void onStageFinish();
 }
