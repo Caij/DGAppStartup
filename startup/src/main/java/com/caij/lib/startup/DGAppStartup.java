@@ -1,5 +1,6 @@
 package com.caij.lib.startup;
 
+import android.os.Looper;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -112,8 +113,15 @@ public class DGAppStartup {
 
         onProjectStart();
 
+        Executor startExecutor;
+        if (Thread.currentThread() == Looper.getMainLooper().getThread()) {
+            startExecutor = getMainExecutor();
+        } else {
+            startExecutor = null;
+        }
+
         for (Initializer task : startInitializes) {
-            task.start();
+            task.start(startExecutor);
         }
 
         return this;
@@ -126,8 +134,6 @@ public class DGAppStartup {
                 if (runnable != null) { runnable.run(); }
             } catch (Exception e) {
                 Log.d(Config.TAG, e.getMessage());
-            } finally {
-                mainTaskCount --;
             }
         }
 
@@ -232,7 +238,11 @@ public class DGAppStartup {
                 taskListener.onFinish(task);
             }
 
-            if (task.isWaitOnMainThread()) { waitCountDownLatch.countDown(); }
+            if (task.isWaitOnMainThread()) {
+                waitCountDownLatch.countDown();
+            } else if (task.isMustRunMainThread()) {
+                mainTaskCount --;
+            }
 
             if (task.isInStage()) {
                 int size = inStageInitializerSize.decrementAndGet();
