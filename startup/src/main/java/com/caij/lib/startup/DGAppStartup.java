@@ -1,6 +1,5 @@
 package com.caij.lib.startup;
 
-import android.os.Looper;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -23,12 +22,12 @@ public class DGAppStartup {
     private int mainTaskCount;
     private Executor mainExecutor;
 
-    private final List<Initializer> initializes;
     private final List<TaskListener> taskListeners;
     private final List<OnProjectListener> projectListeners;
     private final AtomicInteger inStageInitializerSize;
     private final AtomicInteger allInitializerSize;
     private final List<Initializer> startInitializes;
+    private final Map<Class<? extends Initializer>, Initializer> taskMap;
 
     private DGAppStartup(Builder builder) {
         this.taskListeners = builder.taskListeners;
@@ -36,16 +35,15 @@ public class DGAppStartup {
 
         ThreadPoolExecutor threadPoolExecutor = builder.threadPoolExecutor;
 
-        initializes = builder.initializes;
-
         TaskListener defaultTaskListener = new TaskStateListener();
         int inStageSize = 0;
         int waitCount = 0;
 
-        Map<Class<? extends Initializer>, Initializer> taskMap = builder.taskMap;
+        taskMap = builder.taskMap;
 
         startInitializes = new ArrayList<>();
-        for (Initializer initializer : builder.initializes) {
+        for (Map.Entry<Class<? extends Initializer>, Initializer> entry : taskMap.entrySet()) {
+            Initializer initializer = entry.getValue();
             if (initializer.isMustRunMainThread()) {
                 initializer.setExecutorService(getMainExecutor());
                 mainTaskCount ++;
@@ -80,7 +78,7 @@ public class DGAppStartup {
 
         Utils.sort(startInitializes);
 
-        this.allInitializerSize = new AtomicInteger(initializes.size());
+        this.allInitializerSize = new AtomicInteger(taskMap.size());
         this.inStageInitializerSize = new AtomicInteger(inStageSize);
 
         if (waitCount > 0) {
@@ -130,7 +128,7 @@ public class DGAppStartup {
             }
         }
 
-        if (waitCountDownLatch != null) {
+        if (waitCountDownLatch != null &&  waitCountDownLatch.getCount() > 0) {
             try {
                 if (timeout > 0) {
                     waitCountDownLatch.await(timeout, TimeUnit.MILLISECONDS);
@@ -163,7 +161,7 @@ public class DGAppStartup {
         }
 
         if (Config.isStrictMode) {
-            for (Initializer task : initializes) {
+            for (Initializer task : taskMap.values()) {
                 if (!task.isFinished()) {
                     throw new RuntimeException("任务流程执行异常");
                 }
@@ -177,7 +175,6 @@ public class DGAppStartup {
 
     public static class Builder {
 
-        private final List<Initializer> initializes = new ArrayList<>();
         private final List<OnProjectListener> projectListeners = new ArrayList<OnProjectListener>();
         private ThreadPoolExecutor threadPoolExecutor;
         private final List<TaskListener> taskListeners = new ArrayList<>();
@@ -199,13 +196,12 @@ public class DGAppStartup {
 
 
         public Builder add(Initializer initializer) {
-            if (Config.isStrictMode && initializes.contains(initializer)) {
+            if (Config.isStrictMode && taskMap.get(initializer.getClass()) != null) {
                 throw new RuntimeException(initializer.getClass().getSimpleName() + " 已经添加任务");
             }
             if (initializer.getTaskName() == null) {
                 throw new IllegalStateException("task name null");
             }
-            initializes.add(initializer);
             taskMap.put(initializer.getClass(), initializer);
             return Builder.this;
         }
