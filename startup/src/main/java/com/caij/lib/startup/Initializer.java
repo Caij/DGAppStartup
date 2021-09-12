@@ -26,7 +26,7 @@ public abstract class Initializer {
     private TaskListener taskListener;
 
 
-    void start(Executor executor) {
+    void start() {
         if (currentState != STATE_IDLE) {
             throw new RuntimeException("You try to run task " + getTaskName() + " twice, is there a circular dependency?");
         }
@@ -47,16 +47,7 @@ public abstract class Initializer {
             notifyFinished();
         };
 
-        //same executor run
-        if (executor == executorService) {
-            internalRunnable.run();
-        } else {
-            executorService.execute(internalRunnable);
-        }
-    }
-
-    public void start() {
-        start(null);
+        executorService.execute(internalRunnable);
     }
 
     boolean isFinished() {
@@ -68,12 +59,12 @@ public abstract class Initializer {
             Utils.sort(successorList);
 
             for (Initializer task : successorList) {
-                task.onDependenciesTaskFinished(executorService);
+                task.onDependenciesTaskFinished();
             }
         }
     }
 
-    private void onDependenciesTaskFinished(Executor executorService) {
+    private void onDependenciesTaskFinished() {
         int size;
         synchronized (this) {
             dependenciesSize --;
@@ -81,7 +72,7 @@ public abstract class Initializer {
         }
 
         if (size == 0) {
-            start(executorService);
+            start();
         }
     }
 

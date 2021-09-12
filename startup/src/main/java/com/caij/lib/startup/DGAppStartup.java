@@ -113,15 +113,8 @@ public class DGAppStartup {
 
         onProjectStart();
 
-        Executor startExecutor;
-        if (Thread.currentThread() == Looper.getMainLooper().getThread()) {
-            startExecutor = getMainExecutor();
-        } else {
-            startExecutor = null;
-        }
-
         for (Initializer task : startInitializes) {
-            task.start(startExecutor);
+            task.start();
         }
 
         return this;
