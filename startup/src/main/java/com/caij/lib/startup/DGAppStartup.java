@@ -1,15 +1,13 @@
 package com.caij.lib.startup;
 
-import android.util.Log;
+import androidx.annotation.NonNull;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
-import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -18,9 +16,8 @@ public class DGAppStartup {
 
     private CountDownLatch waitCountDownLatch;
 
-    private BlockingQueue<Runnable> blockingQueue;
-    private int mainTaskCount;
-    private Executor mainExecutor;
+    private AtomicInteger atomicMainTaskCount;
+    private MainExecutor mainExecutor;
 
     private final List<TaskListener> taskListeners;
     private final List<OnProjectListener> projectListeners;
@@ -28,10 +25,13 @@ public class DGAppStartup {
     private final AtomicInteger allInitializerSize;
     private final List<Initializer> startInitializes;
     private final Map<Class<? extends Initializer>, Initializer> taskMap;
+    @NonNull
+    private final Config config;
 
     private DGAppStartup(Builder builder) {
         this.taskListeners = builder.taskListeners;
         this.projectListeners = builder.projectListeners;
+        this.config = builder.config;;
 
         ThreadPoolExecutor threadPoolExecutor = builder.threadPoolExecutor;
 
@@ -42,6 +42,7 @@ public class DGAppStartup {
         taskMap = builder.taskMap;
 
         startInitializes = new ArrayList<>();
+        int mainTaskCount = 0;
         for (Map.Entry<Class<? extends Initializer>, Initializer> entry : taskMap.entrySet()) {
             Initializer initializer = entry.getValue();
             if (initializer.isMustRunMainThread()) {
@@ -81,6 +82,10 @@ public class DGAppStartup {
         this.allInitializerSize = new AtomicInteger(taskMap.size());
         this.inStageInitializerSize = new AtomicInteger(inStageSize);
 
+        if (mainTaskCount > 0) {
+            atomicMainTaskCount = new AtomicInteger(mainTaskCount);
+        }
+
         if (waitCount > 0) {
             waitCountDownLatch = new CountDownLatch(waitCount);
         }
@@ -88,12 +93,7 @@ public class DGAppStartup {
 
     private Executor getMainExecutor() {
         if (mainExecutor == null) {
-            if (blockingQueue == null) {
-                blockingQueue = new LinkedBlockingDeque<>();
-                mainExecutor = command -> {
-                    blockingQueue.offer(command);
-                };
-            }
+            mainExecutor = new MainExecutor();
         }
         return mainExecutor;
     }
@@ -119,12 +119,14 @@ public class DGAppStartup {
     }
 
     public void await(long timeout) {
-        while (mainTaskCount > 0) {
+        while (atomicMainTaskCount != null && atomicMainTaskCount.get() > 0) {
             try {
-                Runnable runnable = blockingQueue.take();
-                if (runnable != null) { runnable.run(); }
-            } catch (Exception e) {
-                Log.d(Config.TAG, e.getMessage());
+                Runnable runnable = mainExecutor.take();
+                if (runnable != null) runnable.run();
+            } catch (Throwable e) {
+                if (config.isStrictMode) {
+                    throw new RuntimeException(e);
+                }
             }
         }
 
@@ -136,7 +138,9 @@ public class DGAppStartup {
                     waitCountDownLatch.await();
                 }
             } catch (InterruptedException e) {
-                Log.e(Config.TAG, e.getMessage());
+                if (config.isStrictMode) {
+                    throw new RuntimeException(e);
+                }
             }
         }
     }
@@ -160,7 +164,7 @@ public class DGAppStartup {
             }
         }
 
-        if (Config.isStrictMode) {
+        if (config.isStrictMode) {
             for (Initializer task : taskMap.values()) {
                 if (!task.isFinished()) {
                     throw new RuntimeException("任务流程执行异常");
@@ -179,8 +183,12 @@ public class DGAppStartup {
         private ThreadPoolExecutor threadPoolExecutor;
         private final List<TaskListener> taskListeners = new ArrayList<>();
         private final Map<Class<? extends Initializer>, Initializer> taskMap = new HashMap<>();
+        private Config config;
 
         public DGAppStartup create() {
+            if (config == null) {
+                config = Config.Holder.DEFAULT;
+            }
             return new DGAppStartup(this);
         }
 
@@ -194,9 +202,14 @@ public class DGAppStartup {
             return Builder.this;
         }
 
+        public Builder setConfig(Config config) {
+            this.config = config;
+            return Builder.this;
+        }
+
 
         public Builder add(Initializer initializer) {
-            if (Config.isStrictMode && taskMap.get(initializer.getClass()) != null) {
+            if (taskMap.get(initializer.getClass()) != null) {
                 throw new RuntimeException(initializer.getClass().getSimpleName() + " 已经添加任务");
             }
             if (initializer.getTaskName() == null) {
@@ -215,6 +228,11 @@ public class DGAppStartup {
     private class TaskStateListener implements TaskListener {
 
         @Override
+        public void onWaitRunning(Initializer initializer) {
+
+        }
+
+        @Override
         public void onStart(Initializer task) {
             for (TaskListener taskListener : taskListeners) {
                 taskListener.onStart(task);
@@ -222,24 +240,25 @@ public class DGAppStartup {
         }
 
         @Override
-        public void onFinish(Initializer task) {
+        public void onFinish(Initializer task, long dw, long df) {
             for (TaskListener taskListener : taskListeners) {
-                taskListener.onFinish(task);
+                taskListener.onFinish(task, dw, df);
             }
 
             if (task.isWaitOnMainThread()) {
                 waitCountDownLatch.countDown();
             } else if (task.isMustRunMainThread()) {
-                mainTaskCount --;
+                atomicMainTaskCount.decrementAndGet();
             }
 
             if (task.isInStage()) {
                 int size = inStageInitializerSize.decrementAndGet();
-                if (size == 0) { notifyStageFinish(); }
+                if (size == 0)  notifyStageFinish();
             }
 
             int size = allInitializerSize.decrementAndGet();
-            if (size == 0) { onProjectFinish(); }
+            if (size == 0) onProjectFinish();
         }
+
     }
 }

@@ -22,5 +22,9 @@ public class Config {
     /**
      * check state strict mode , will throw illegal state some exception
      */
-    public static boolean isStrictMode = false;
+    public boolean isStrictMode = false;
+
+    public static class Holder {
+        public static final Config DEFAULT = new Config();
+    }
 }

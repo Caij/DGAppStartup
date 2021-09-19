@@ -1,5 +1,7 @@
 package com.caij.lib.startup;
 
+import android.os.SystemClock;
+
 import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -23,27 +25,33 @@ public abstract class Initializer {
     private volatile int currentState = STATE_IDLE;
 
     private final List<Initializer> successorList = new ArrayList<>();
+
     private TaskListener taskListener;
+
+    private Config config;
 
 
     void start() {
         if (currentState != STATE_IDLE) {
             throw new RuntimeException("You try to run task " + getTaskName() + " twice, is there a circular dependency?");
         }
-
+        long startTime = SystemClock.uptimeMillis();
         switchState(STATE_WAIT);
+        if (taskListener != null) { taskListener.onWaitRunning(Initializer.this); }
         Runnable internalRunnable = () -> {
-            if (taskListener != null) { taskListener.onStart(Initializer.this); }
             switchState(STATE_RUNNING);
+            long dw = SystemClock.uptimeMillis() - startTime;
+            if (taskListener != null) { taskListener.onStart(Initializer.this); }
             try {
                 Initializer.this.run();
             } catch (Throwable e) {
-                if (Config.isStrictMode) {
+                if (config.isStrictMode) {
                     throw e;
                 }
             }
             switchState(STATE_FINISHED);
-            if (taskListener != null) { taskListener.onFinish(Initializer.this); }
+            long df = SystemClock.uptimeMillis() - startTime;
+            if (taskListener != null) { taskListener.onFinish(Initializer.this, dw, df); }
             notifyFinished();
         };
 
@@ -101,6 +109,10 @@ public abstract class Initializer {
 
     void setTaskListener(TaskListener taskListener) {
         this.taskListener = taskListener;
+    }
+
+    public void setConfig(Config config) {
+        this.config = config;
     }
 
     //----------------------------------
