@@ -54,7 +54,9 @@ new DGAppStartup.Builder()
         .start()
         .await();
 ```
+# Related Articles
 
+[框架篇DGAppStartup](https://juejin.cn/post/7009961273009897502)
 
 # License
 

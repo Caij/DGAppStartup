@@ -31,7 +31,7 @@ public class DGAppStartup {
     private DGAppStartup(Builder builder) {
         this.taskListeners = builder.taskListeners;
         this.projectListeners = builder.projectListeners;
-        this.config = builder.config;;
+        this.config = builder.config;
 
         ThreadPoolExecutor threadPoolExecutor = builder.threadPoolExecutor;
 
