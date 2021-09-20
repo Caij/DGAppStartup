@@ -1,4 +1,4 @@
-package com.caij.lib.startup;
+package com.caij.app.startup;
 
 import androidx.annotation.NonNull;
 
@@ -21,10 +21,10 @@ public class DGAppStartup {
 
     private final List<TaskListener> taskListeners;
     private final List<OnProjectListener> projectListeners;
-    private final AtomicInteger inStageInitializerSize;
-    private final AtomicInteger allInitializerSize;
-    private final List<Initializer> startInitializes;
-    private final Map<Class<? extends Initializer>, Initializer> taskMap;
+    private final AtomicInteger remainingStageTaskCount;
+    private final AtomicInteger remainingTaskCount;
+    private final List<Task> startTaskNodes;
+    private final Map<Class<? extends Task>, Task> taskMap;
     @NonNull
     private final Config config;
 
@@ -41,47 +41,46 @@ public class DGAppStartup {
 
         taskMap = builder.taskMap;
 
-        startInitializes = new ArrayList<>();
+        startTaskNodes = new ArrayList<>();
         int mainTaskCount = 0;
-        for (Map.Entry<Class<? extends Initializer>, Initializer> entry : taskMap.entrySet()) {
-            Initializer initializer = entry.getValue();
-            initializer.setConfig(config);
-            if (initializer.isMustRunMainThread()) {
-                initializer.setExecutorService(getMainExecutor());
+        for (Task task : builder.tasks) {
+            task.setConfig(config);
+            if (task.isMustRunMainThread()) {
+                task.setExecutorService(getMainExecutor());
                 mainTaskCount ++;
             } else {
-                initializer.setExecutorService(threadPoolExecutor);
+                task.setExecutorService(threadPoolExecutor);
             }
 
-            if (initializer.isInStage()) {
+            if (task.isInStage()) {
                 inStageSize ++;
             }
 
-            if (initializer.isWaitOnMainThread()) {
+            if (task.isWaitOnMainThread()) {
                 waitCount ++;
             }
 
-            initializer.setTaskListener(defaultTaskListener);
+            task.setTaskListener(defaultTaskListener);
 
-            List<Class<? extends Initializer>> dependencies = initializer.dependencies();
+            List<Class<? extends Task>> dependencies = task.dependencies();
             if (dependencies != null && !dependencies.isEmpty()) {
-                for (Class<? extends Initializer> clazz : dependencies) {
-                    Initializer depTask = taskMap.get(clazz);
+                for (Class<? extends Task> clazz : dependencies) {
+                    Task depTask = taskMap.get(clazz);
                     if (depTask != null) {
-                        initializer.addDependencies(depTask);
+                        task.addDependencies(depTask);
                     } else {
                         throw new RuntimeException(clazz.getSimpleName() + " 未注册启动任务");
                     }
                 }
             } else {
-                startInitializes.add(initializer);
+                startTaskNodes.add(task);
             }
         }
 
-        Utils.sort(startInitializes);
+        Utils.sort(startTaskNodes);
 
-        this.allInitializerSize = new AtomicInteger(taskMap.size());
-        this.inStageInitializerSize = new AtomicInteger(inStageSize);
+        this.remainingTaskCount = new AtomicInteger(taskMap.size());
+        this.remainingStageTaskCount = new AtomicInteger(inStageSize);
 
         if (mainTaskCount > 0) {
             atomicMainTaskCount = new AtomicInteger(mainTaskCount);
@@ -106,13 +105,13 @@ public class DGAppStartup {
     }
 
     public DGAppStartup start() {
-        if (startInitializes.isEmpty()) {
+        if (startTaskNodes.isEmpty()) {
             throw new RuntimeException("not have start task, please check task dependencies");
         }
 
         onProjectStart();
 
-        for (Initializer task : startInitializes) {
+        for (Task task : startTaskNodes) {
             task.start();
         }
 
@@ -166,7 +165,7 @@ public class DGAppStartup {
         }
 
         if (config.isStrictMode) {
-            for (Initializer task : taskMap.values()) {
+            for (Task task : taskMap.values()) {
                 if (!task.isFinished()) {
                     throw new RuntimeException("任务流程执行异常");
                 }
@@ -183,8 +182,9 @@ public class DGAppStartup {
         private final List<OnProjectListener> projectListeners = new ArrayList<OnProjectListener>();
         private ThreadPoolExecutor threadPoolExecutor;
         private final List<TaskListener> taskListeners = new ArrayList<>();
-        private final Map<Class<? extends Initializer>, Initializer> taskMap = new HashMap<>();
+        private final Map<Class<? extends Task>, Task> taskMap = new HashMap<>();
         private Config config;
+        private List<Task> tasks;
 
         public DGAppStartup create() {
             if (config == null) {
@@ -209,14 +209,18 @@ public class DGAppStartup {
         }
 
 
-        public Builder add(Initializer initializer) {
-            if (taskMap.get(initializer.getClass()) != null) {
-                throw new RuntimeException(initializer.getClass().getSimpleName() + " 已经添加任务");
+        public Builder add(Task task) {
+            if (taskMap.get(task.getClass()) != null) {
+                throw new RuntimeException(task.getClass().getSimpleName() + " 已经添加任务");
             }
-            if (initializer.getTaskName() == null) {
+            if (task.getTaskName() == null) {
                 throw new IllegalStateException("task name null");
             }
-            taskMap.put(initializer.getClass(), initializer);
+            if (tasks == null) {
+                tasks = new ArrayList<>();
+            }
+            tasks.add(task);
+            taskMap.put(task.getClass(), task);
             return Builder.this;
         }
 
@@ -229,19 +233,19 @@ public class DGAppStartup {
     private class TaskStateListener implements TaskListener {
 
         @Override
-        public void onWaitRunning(Initializer initializer) {
+        public void onWaitRunning(Task task) {
 
         }
 
         @Override
-        public void onStart(Initializer task) {
+        public void onStart(Task task) {
             for (TaskListener taskListener : taskListeners) {
                 taskListener.onStart(task);
             }
         }
 
         @Override
-        public void onFinish(Initializer task, long dw, long df) {
+        public void onFinish(Task task, long dw, long df) {
             for (TaskListener taskListener : taskListeners) {
                 taskListener.onFinish(task, dw, df);
             }
@@ -253,11 +257,11 @@ public class DGAppStartup {
             }
 
             if (task.isInStage()) {
-                int size = inStageInitializerSize.decrementAndGet();
+                int size = remainingStageTaskCount.decrementAndGet();
                 if (size == 0)  notifyStageFinish();
             }
 
-            int size = allInitializerSize.decrementAndGet();
+            int size = remainingTaskCount.decrementAndGet();
             if (size == 0) onProjectFinish();
         }
 

@@ -14,11 +14,10 @@
  * limitations under the License.
  */
 
-package com.caij.lib.startup;
+package com.caij.app.startup;
 
 
 public class Config {
-    public static final String TAG = "DGAppStartup";
     /**
      * check state strict mode , will throw illegal state some exception
      */

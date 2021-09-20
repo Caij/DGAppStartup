@@ -1,4 +1,4 @@
-package com.caij.lib.startup;
+package com.caij.app.startup;
 
 import android.os.SystemClock;
 
@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
 
-public abstract class Initializer {
+public abstract class Task {
 
     public static final int STATE_IDLE = 0;
     public static final int STATE_RUNNING = 1;
@@ -18,7 +18,7 @@ public abstract class Initializer {
     private Executor executorService;
     private int waitCount = 0;
     private volatile int currentState = STATE_IDLE;
-    private List<Initializer> childNodeList;
+    private List<Task> childNodeList;
     private TaskListener taskListener;
     private Config config;
 
@@ -29,13 +29,13 @@ public abstract class Initializer {
         }
         long startTime = SystemClock.uptimeMillis();
         switchState(STATE_WAIT);
-        if (taskListener != null) { taskListener.onWaitRunning(Initializer.this); }
+        if (taskListener != null) { taskListener.onWaitRunning(Task.this); }
         Runnable internalRunnable = () -> {
             switchState(STATE_RUNNING);
             long dw = SystemClock.uptimeMillis() - startTime;
-            if (taskListener != null) { taskListener.onStart(Initializer.this); }
+            if (taskListener != null) { taskListener.onStart(Task.this); }
             try {
-                Initializer.this.run();
+                Task.this.run();
             } catch (Throwable e) {
                 if (config.isStrictMode) {
                     throw e;
@@ -43,7 +43,7 @@ public abstract class Initializer {
             }
             switchState(STATE_FINISHED);
             long df = SystemClock.uptimeMillis() - startTime;
-            if (taskListener != null) { taskListener.onFinish(Initializer.this, dw, df); }
+            if (taskListener != null) { taskListener.onFinish(Task.this, dw, df); }
             notifyFinished();
         };
 
@@ -58,13 +58,13 @@ public abstract class Initializer {
         if (childNodeList != null && !childNodeList.isEmpty()) {
             Utils.sort(childNodeList);
 
-            for (Initializer task : childNodeList) {
-                task.onDependenciesTaskFinished();
+            for (Task task : childNodeList) {
+                task.onDepTaskFinished();
             }
         }
     }
 
-    private void onDependenciesTaskFinished() {
+    private void onDepTaskFinished() {
         int size;
         synchronized (this) {
             waitCount--;
@@ -80,7 +80,7 @@ public abstract class Initializer {
         currentState = state;
     }
 
-    void addDependencies(Initializer depTask) {
+    void addDependencies(Task depTask) {
         if (currentState != STATE_IDLE) {
             throw new RuntimeException("task " + getTaskName() + " running");
         }
@@ -88,7 +88,7 @@ public abstract class Initializer {
         depTask.addChildNode(this);
     }
 
-    private void addChildNode(Initializer task) {
+    private void addChildNode(Task task) {
         if (task == this) {
             throw new RuntimeException("A task should not after itself.");
         }
@@ -117,7 +117,7 @@ public abstract class Initializer {
      */
     public abstract void run();
 
-    protected abstract List<Class<? extends Initializer>> dependencies();
+    protected abstract List<Class<? extends Task>> dependencies();
 
     /**
      * @return dga start await task finish.

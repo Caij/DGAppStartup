@@ -1,4 +1,4 @@
-package com.caij.lib.startup;
+package com.caij.app.startup;
 
 import androidx.appcompat.app.AppCompatActivity;
 
