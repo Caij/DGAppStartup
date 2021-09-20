@@ -45,6 +45,7 @@ public class DGAppStartup {
         int mainTaskCount = 0;
         for (Map.Entry<Class<? extends Initializer>, Initializer> entry : taskMap.entrySet()) {
             Initializer initializer = entry.getValue();
+            initializer.setConfig(config);
             if (initializer.isMustRunMainThread()) {
                 initializer.setExecutorService(getMainExecutor());
                 mainTaskCount ++;

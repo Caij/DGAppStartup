@@ -11,23 +11,15 @@ import java.util.concurrent.Executor;
 public abstract class Initializer {
 
     public static final int STATE_IDLE = 0;
-
     public static final int STATE_RUNNING = 1;
-
     public static final int STATE_FINISHED = 2;
-
     public static final int STATE_WAIT = 3;
 
     private Executor executorService;
-
-    private int dependenciesSize = 0;
-
+    private int waitCount = 0;
     private volatile int currentState = STATE_IDLE;
-
-    private final List<Initializer> successorList = new ArrayList<>();
-
+    private List<Initializer> childNodeList;
     private TaskListener taskListener;
-
     private Config config;
 
 
@@ -63,10 +55,10 @@ public abstract class Initializer {
     }
 
     private void notifyFinished() {
-        if (!successorList.isEmpty()) {
-            Utils.sort(successorList);
+        if (childNodeList != null && !childNodeList.isEmpty()) {
+            Utils.sort(childNodeList);
 
-            for (Initializer task : successorList) {
+            for (Initializer task : childNodeList) {
                 task.onDependenciesTaskFinished();
             }
         }
@@ -75,8 +67,8 @@ public abstract class Initializer {
     private void onDependenciesTaskFinished() {
         int size;
         synchronized (this) {
-            dependenciesSize --;
-            size = dependenciesSize;
+            waitCount--;
+            size = waitCount;
         }
 
         if (size == 0) {
@@ -92,15 +84,18 @@ public abstract class Initializer {
         if (currentState != STATE_IDLE) {
             throw new RuntimeException("task " + getTaskName() + " running");
         }
-        dependenciesSize ++;
-        depTask.addSuccessor(this);
+        waitCount++;
+        depTask.addChildNode(this);
     }
 
-    private void addSuccessor(Initializer task) {
+    private void addChildNode(Initializer task) {
         if (task == this) {
             throw new RuntimeException("A task should not after itself.");
         }
-        successorList.add(task);
+        if (childNodeList == null) {
+            childNodeList = new ArrayList<>();
+        }
+        childNodeList.add(task);
     }
 
     void setExecutorService(Executor executor) {
@@ -111,7 +106,7 @@ public abstract class Initializer {
         this.taskListener = taskListener;
     }
 
-    public void setConfig(Config config) {
+    void setConfig(Config config) {
         this.config = config;
     }
 
