@@ -1,5 +1,6 @@
 # DGAppStartup
 The DGAppStartup library provides a straightforward, performant way to initialize components at application startup. Both library developers and app developers can use DGAppStartup to streamline startup sequences and explicitly set the order of initialization.
+
 At the same time, the DGAppStartup support async await and sync await. And topological ordering is used to ensure the initialization order of dependent components.
 
 # Dependency
