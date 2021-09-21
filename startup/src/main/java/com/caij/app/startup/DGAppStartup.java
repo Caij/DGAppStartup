@@ -1,7 +1,5 @@
 package com.caij.app.startup;
 
-import android.util.Log;
-
 import androidx.annotation.NonNull;
 
 import java.util.ArrayList;
@@ -16,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class DGAppStartup {
 
-    private static final String TAG = "DGAppStartup";
+    public static final String TAG = "DGAppStartup";
 
     private CountDownLatch waitCountDownLatch;
     private AtomicInteger atomicMainTaskCount;
@@ -176,7 +174,7 @@ public class DGAppStartup {
                 if (config.isStrictMode) {
                     throw new RuntimeException("task " + task.getTaskName() + "not execute");
                 } else {
-                    logger.e(TAG, "task " + task.getTaskName() + "not execute");
+                    logger.e(TAG, "task " + task.getTaskName() + "not execute", null);
                 }
             }
         }

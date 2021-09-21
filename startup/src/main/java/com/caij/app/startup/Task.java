@@ -43,6 +43,8 @@ public abstract class Task {
                 } catch (Throwable e) {
                     if (startup.config.isStrictMode) {
                         throw e;
+                    } else {
+                        startup.logger.e(DGAppStartup.TAG, "task Throwable " + e.getMessage(), e);
                     }
                 }
                 switchState(STATE_FINISHED);

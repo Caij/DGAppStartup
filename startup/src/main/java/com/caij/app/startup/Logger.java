@@ -4,7 +4,7 @@ import android.util.Log;
 
 public interface Logger {
 
-    public void e(String tag, String msg);
+    public void e(String tag, String msg, Throwable e);
 
     public void d(String tag, String msg);
 
@@ -12,7 +12,7 @@ public interface Logger {
     public static class DefaultLogger implements Logger {
 
         @Override
-        public void e(String tag, String msg) {
+        public void e(String tag, String msg, Throwable e) {
             Log.e(tag, msg);
         }
 
