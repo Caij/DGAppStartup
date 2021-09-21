@@ -20,7 +20,7 @@ public abstract class Task {
     private volatile int currentState = STATE_IDLE;
     private List<Task> childNodeList;
     private TaskListener taskListener;
-    private Config config;
+    private DGAppStartup startup;
 
 
     void start() {
@@ -29,24 +29,28 @@ public abstract class Task {
         }
         long startTime = SystemClock.uptimeMillis();
         switchState(STATE_WAIT);
-        if (taskListener != null) { taskListener.onWaitRunning(Task.this); }
-        Runnable internalRunnable = () -> {
-            switchState(STATE_RUNNING);
-            long dw = SystemClock.uptimeMillis() - startTime;
-            if (taskListener != null) { taskListener.onStart(Task.this); }
-            try {
-                Task.this.run();
-            } catch (Throwable e) {
-                if (config.isStrictMode) {
-                    throw e;
+        if (taskListener != null) {
+            taskListener.onWaitRunning(Task.this);
+        }
+        Runnable internalRunnable = new Runnable() {
+            @Override
+            public void run() {
+                switchState(STATE_RUNNING);
+                long dw = SystemClock.uptimeMillis() - startTime;
+                if (taskListener != null) { taskListener.onStart(Task.this); }
+                try {
+                    Task.this.run();
+                } catch (Throwable e) {
+                    if (startup.config.isStrictMode) {
+                        throw e;
+                    }
                 }
+                switchState(STATE_FINISHED);
+                long df = SystemClock.uptimeMillis() - startTime;
+                if (taskListener != null) { taskListener.onFinish(Task.this, dw, df); }
+                notifyFinished();
             }
-            switchState(STATE_FINISHED);
-            long df = SystemClock.uptimeMillis() - startTime;
-            if (taskListener != null) { taskListener.onFinish(Task.this, dw, df); }
-            notifyFinished();
         };
-
         executorService.execute(internalRunnable);
     }
 
@@ -106,8 +110,8 @@ public abstract class Task {
         this.taskListener = taskListener;
     }
 
-    void setConfig(Config config) {
-        this.config = config;
+    void setStartup(DGAppStartup startup) {
+        this.startup = startup;
     }
 
     //----------------------------------

@@ -1,5 +1,7 @@
 package com.caij.app.startup;
 
+import android.util.Log;
+
 import androidx.annotation.NonNull;
 
 import java.util.ArrayList;
@@ -14,24 +16,28 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class DGAppStartup {
 
-    private CountDownLatch waitCountDownLatch;
+    private static final String TAG = "DGAppStartup";
 
+    private CountDownLatch waitCountDownLatch;
     private AtomicInteger atomicMainTaskCount;
     private MainExecutor mainExecutor;
-
     private final List<TaskListener> taskListeners;
     private final List<OnProjectListener> projectListeners;
     private final AtomicInteger remainingStageTaskCount;
     private final AtomicInteger remainingTaskCount;
     private final List<Task> startTaskNodes;
     private final Map<Class<? extends Task>, Task> taskMap;
+
     @NonNull
-    private final Config config;
+    final Config config;
+    @NonNull
+    final Logger logger;
 
     private DGAppStartup(Builder builder) {
         this.taskListeners = builder.taskListeners;
         this.projectListeners = builder.projectListeners;
         this.config = builder.config;
+        this.logger = builder.logger;
 
         ThreadPoolExecutor threadPoolExecutor = builder.threadPoolExecutor;
 
@@ -44,7 +50,7 @@ public class DGAppStartup {
         startTaskNodes = new ArrayList<>();
         int mainTaskCount = 0;
         for (Task task : builder.tasks) {
-            task.setConfig(config);
+            task.setStartup(this);
             if (task.isMustRunMainThread()) {
                 task.setExecutorService(getMainExecutor());
                 mainTaskCount ++;
@@ -69,7 +75,7 @@ public class DGAppStartup {
                     if (depTask != null) {
                         task.addDependencies(depTask);
                     } else {
-                        throw new RuntimeException(clazz.getSimpleName() + " 未注册启动任务");
+                        throw new RuntimeException(clazz.getSimpleName() + " not added");
                     }
                 }
             } else {
@@ -164,10 +170,13 @@ public class DGAppStartup {
             }
         }
 
-        if (config.isStrictMode) {
-            for (Task task : taskMap.values()) {
-                if (!task.isFinished()) {
-                    throw new RuntimeException("任务流程执行异常");
+
+        for (Task task : taskMap.values()) {
+            if (!task.isFinished()) {
+                if (config.isStrictMode) {
+                    throw new RuntimeException("task " + task.getTaskName() + "not execute");
+                } else {
+                    logger.e(TAG, "task " + task.getTaskName() + "not execute");
                 }
             }
         }
@@ -185,10 +194,14 @@ public class DGAppStartup {
         private final Map<Class<? extends Task>, Task> taskMap = new HashMap<>();
         private Config config;
         private List<Task> tasks;
+        private Logger logger;
 
         public DGAppStartup create() {
             if (config == null) {
-                config = Config.Holder.DEFAULT;
+                config = new Config();
+            }
+            if (logger == null) {
+                logger = new Logger.DefaultLogger();
             }
             return new DGAppStartup(this);
         }
@@ -208,10 +221,14 @@ public class DGAppStartup {
             return Builder.this;
         }
 
+        public Builder setLogger(Logger logger) {
+            this.logger = logger;
+            return Builder.this;
+        }
 
         public Builder add(Task task) {
             if (taskMap.get(task.getClass()) != null) {
-                throw new RuntimeException(task.getClass().getSimpleName() + " 已经添加任务");
+                throw new RuntimeException(task.getClass().getSimpleName() + " had task");
             }
             if (task.getTaskName() == null) {
                 throw new IllegalStateException("task name null");
@@ -258,11 +275,15 @@ public class DGAppStartup {
 
             if (task.isInStage()) {
                 int size = remainingStageTaskCount.decrementAndGet();
-                if (size == 0)  notifyStageFinish();
+                if (size == 0) {
+                    notifyStageFinish();
+                }
             }
 
             int size = remainingTaskCount.decrementAndGet();
-            if (size == 0) onProjectFinish();
+            if (size == 0) {
+                onProjectFinish();
+            }
         }
 
     }

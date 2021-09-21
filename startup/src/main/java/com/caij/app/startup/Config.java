@@ -23,7 +23,4 @@ public class Config {
      */
     public boolean isStrictMode = false;
 
-    public static class Holder {
-        public static final Config DEFAULT = new Config();
-    }
 }
