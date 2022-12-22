@@ -4,20 +4,11 @@ The `DGAppStartup` library provides a straightforward, performant way to initial
 At the same time, the `DGAppStartup` support async await and sync await. And topological ordering is used to ensure the initialization order of dependent components.
 
 # Dependency
-add this in your root build.gradle
-
-```
-allprojects {
-    repositories {
-        maven { url "https://www.jitpack.io" }
-    }
-}
-```
 
 Then, add the library to your module build.gradle
 ```
 dependencies {
-    implementation 'com.github.Caij:DGAppStartup:latest.release.version'
+    implementation 'io.github.caij:DGAppStartup:1.2.0'
 }
 ```
 

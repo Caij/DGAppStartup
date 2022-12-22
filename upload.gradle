@@ -1,38 +1,92 @@
-apply plugin: 'maven'
-
-task sourceJar(type: Jar) {
+task sourcesJar(type: Jar) {
     from android.sourceSets.main.java.srcDirs
-    classifier "sources"
+    classifier 'sources'
 }
 
-artifacts {
-    archives sourceJar
-}
+//task javadoc(type: Javadoc) {
+//    source android.sourceSets.main.java.srcDirs
+//    classpath += project.files(android.getBootClasspath().join(File.pathSeparator))
+//}
 
-uploadArchives {
+//task javadocJar(type: Jar, dependsOn: javadoc) {
+//    classifier 'javadoc'
+//    from javadoc.destinationDir
+//}
+
+File localPropertiesFile = new File(rootDir.getAbsolutePath() + "/local.properties")
+Properties properties = new Properties()
+properties.load(localPropertiesFile.newDataInputStream())
+def mavenCenterUsername = properties.getProperty('mavenCenterUsername', "")
+def mavenCenterPassword = properties.getProperty('mavenCenterPassword', "")
+def mavenCenterRepoUrl = properties.getProperty('mavenCenterRepoUrl', "")
+def privateRepoUrl = properties.getProperty('privateRepoUrl', "")
+def privateRepoUserName = properties.getProperty('privateRepoUserName', "")
+def privateRepoPassword = properties.getProperty('privateRepoPassword', "")
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+
+            artifact sourcesJar
+//            artifact javadocJar
+
+            pom {
+                name = 'DGAppStartup'
+                description = 'DGAppStartup'
+                url = 'https://github.com/Caij/DGAppStartup'
+
+                licenses {
+                    license {
+                        name = 'The Apache License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    }
+                }
+
+                developers {
+                    developer {
+                        id = 'caij'
+                        name = 'caij'
+                        email = 'dev.caij@gmail.com'
+                    }
+                }
+
+                scm {
+                    connection = 'https://github.com/Caij/DGAppStartup.git'
+                    developerConnection = 'https://github.com/Caij/DGAppStartup.git'
+                    url = 'https://github.com/Caij/DGAppStartup'
+                }
+            }
+
+            groupId "io.github.caij"
+            artifactId "DGAppStartup"
+            version "1.2.0"
+
+            afterEvaluate {
+                from components.release
+            }
+        }
+    }
+
     repositories {
-        File localPropertiesFile = new File(rootDir.getAbsolutePath() + "/local.properties")
-        Properties properties = new Properties()
-        properties.load(localPropertiesFile.newDataInputStream())
-        def repositoryUrl = properties.getProperty('repositoryUrl')
-        def snapshotRepositoryUrl = properties.getProperty('snapshotRepositoryUrl')
-        def password = properties.getProperty('password')
-        def userName = properties.getProperty('userName')
-        mavenDeployer {
-            repository(url: "$repositoryUrl"){
-                authentication(userName: "$userName", password: "$password")
+        maven {
+            url mavenCenterRepoUrl
+            credentials {
+                username mavenCenterUsername // ossrhUsername is your sonatype username
+                password mavenCenterPassword // ossrhUsername is your sonatype password
             }
-
-            snapshotRepository(url: "$snapshotRepositoryUrl") {
-                authentication(userName: "$userName", password: "$password")
-            }
-
-            project.afterEvaluate {
-                def versionName = "${android.defaultConfig.versionName}"
-                pom.version = versionName
-                pom.artifactId = "$project.name"
-                pom.groupId = "com.caij.startup"
+        }
+        maven {
+            url privateRepoUrl
+            credentials {
+                username privateRepoUserName // ossrhUsername is your sonatype username
+                password privateRepoPassword // ossrhUsername is your sonatype password
             }
         }
     }
 }
+
+// signing, this need key, secret, we put it into gradle.properties
+signing {
+    sign publishing.publications.maven
+}
+
