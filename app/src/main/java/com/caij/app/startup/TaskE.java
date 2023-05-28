@@ -13,8 +13,8 @@ public class TaskE extends Task {
     }
 
     @Override
-    protected List<Class<? extends Task>> dependencies() {
-        return Arrays.asList(MainTaskB.class, TaskD.class);
+    protected List<String> dependencies() {
+        return Arrays.asList(MainTaskB.TASK_NAME, TaskD.TASK_NAME);
     }
 
     @Override

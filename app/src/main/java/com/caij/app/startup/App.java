@@ -35,7 +35,6 @@ public class App extends Application {
                     }
                 })
                 .create()
-                .start()
-                .await();
+                .start();
     }
 }

@@ -6,19 +6,21 @@ import java.util.List;
 
 public class MainTaskA extends Task {
 
+    public static final String TASK_NAME = "TaskA";
+
     @Override
     public void run() {
         Log.d(Tag.TAG, "run a");
     }
 
     @Override
-    protected List<Class<? extends Task>> dependencies() {
+    protected List<String> dependencies() {
         return null;
     }
 
     @Override
     public String getTaskName() {
-        return "TaskA";
+        return TASK_NAME;
     }
 
     @Override

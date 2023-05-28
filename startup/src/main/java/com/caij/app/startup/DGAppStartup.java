@@ -9,7 +9,6 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class DGAppStartup {
@@ -24,7 +23,7 @@ public class DGAppStartup {
     private final AtomicInteger remainingStageTaskCount;
     private final AtomicInteger remainingTaskCount;
     private final List<Task> startTaskNodes;
-    private final Map<Class<? extends Task>, Task> taskMap;
+    private final Map<String, Task> taskMap;
 
     @NonNull
     final Config config;
@@ -66,14 +65,14 @@ public class DGAppStartup {
 
             task.setTaskListener(defaultTaskListener);
 
-            List<Class<? extends Task>> dependencies = task.dependencies();
+            List<String> dependencies = task.dependencies();
             if (dependencies != null && !dependencies.isEmpty()) {
-                for (Class<? extends Task> clazz : dependencies) {
-                    Task depTask = taskMap.get(clazz);
+                for (String depTaskName : dependencies) {
+                    Task depTask = taskMap.get(depTaskName);
                     if (depTask != null) {
                         task.addDependencies(depTask);
                     } else {
-                        throw new RuntimeException(clazz.getSimpleName() + " not added");
+                        throw new RuntimeException(depTaskName + " not added");
                     }
                 }
             } else {
@@ -108,7 +107,7 @@ public class DGAppStartup {
         }
     }
 
-    public DGAppStartup start() {
+    public void start() {
         if (startTaskNodes.isEmpty()) {
             throw new RuntimeException("not have start task, please check task dependencies");
         }
@@ -119,10 +118,6 @@ public class DGAppStartup {
             task.start();
         }
 
-        return this;
-    }
-
-    public void await(long timeout) {
         while (atomicMainTaskCount != null && atomicMainTaskCount.get() > 0) {
             try {
                 Runnable runnable = mainExecutor.take();
@@ -136,21 +131,13 @@ public class DGAppStartup {
 
         if (waitCountDownLatch != null &&  waitCountDownLatch.getCount() > 0) {
             try {
-                if (timeout > 0) {
-                    waitCountDownLatch.await(timeout, TimeUnit.MILLISECONDS);
-                } else {
-                    waitCountDownLatch.await();
-                }
+                waitCountDownLatch.await();
             } catch (InterruptedException e) {
                 if (config.isStrictMode) {
                     throw new RuntimeException(e);
                 }
             }
         }
-    }
-
-    public void await() {
-        await(-1);
     }
 
     private void onProjectStart() {
@@ -189,7 +176,7 @@ public class DGAppStartup {
         private final List<OnProjectListener> projectListeners = new ArrayList<OnProjectListener>();
         private ThreadPoolExecutor threadPoolExecutor;
         private final List<TaskListener> taskListeners = new ArrayList<>();
-        private final Map<Class<? extends Task>, Task> taskMap = new HashMap<>();
+        private final Map<String, Task> taskMap = new HashMap<>();
         private Config config;
         private List<Task> tasks;
         private Logger logger;
@@ -225,8 +212,11 @@ public class DGAppStartup {
         }
 
         public Builder add(Task task) {
-            if (taskMap.get(task.getClass()) != null) {
-                throw new RuntimeException(task.getClass().getSimpleName() + " had task");
+            Task addedTask = taskMap.get(task.getTaskName());
+            if (addedTask != null) {
+                String ep = task.getClass().getSimpleName() + " " + task.getTaskName()
+                        + addedTask.getClass().getSimpleName() + " " + addedTask.getTaskName();
+                throw new RuntimeException(ep + " mu task");
             }
             if (task.getTaskName() == null) {
                 throw new IllegalStateException("task name null");
@@ -235,7 +225,7 @@ public class DGAppStartup {
                 tasks = new ArrayList<>();
             }
             tasks.add(task);
-            taskMap.put(task.getClass(), task);
+            taskMap.put(task.getTaskName(), task);
             return Builder.this;
         }
 

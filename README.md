@@ -42,8 +42,7 @@ new DGAppStartup.Builder()
             }
         })
         .create()
-        .start()
-        .await();
+        .start();
 ```
 # Related Articles
 

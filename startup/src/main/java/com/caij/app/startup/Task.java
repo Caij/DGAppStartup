@@ -123,7 +123,7 @@ public abstract class Task {
      */
     public abstract void run();
 
-    protected abstract List<Class<? extends Task>> dependencies();
+    protected abstract List<String> dependencies();
 
     /**
      * @return dga start await task finish.
