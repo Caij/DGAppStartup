@@ -59,7 +59,7 @@ publishing {
 
             groupId "io.github.caij"
             artifactId "DGAppStartup"
-            version "1.2.0"
+            version "1.2.1"
 
             afterEvaluate {
                 from components.release

@@ -8,7 +8,7 @@ At the same time, the `DGAppStartup` support async await and sync await. And top
 Then, add the library to your module build.gradle
 ```
 dependencies {
-    implementation 'io.github.caij:DGAppStartup:1.2.0'
+    implementation 'io.github.caij:DGAppStartup:1.2.1'
 }
 ```
 
